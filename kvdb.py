@@ -1,10 +1,10 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from modeling_phi3 import Phi3ForCausalLM
 
 # 加载模型和分词器
 model_name = "microsoft/Phi-3-mini-4k-instruct"
-#model_name = "./phi3mini4kinst"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
+model = Phi3ForCausalLM.from_pretrained(model_name)
 
 # 输入文本
 input_text = "Long long ago there was a little girl lived in a land far far away.  One day"
