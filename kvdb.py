@@ -21,6 +21,8 @@ for i in range(256):
     outputs = model.generate(**inputs, max_new_tokens=1, use_cache=True, num_return_sequences=1, past_key_values=cache)
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     new_text = generated_text[length:]
+    if length == 0:
+        print('----------------------------')
     print(new_text, end='', flush=True)
     length = len(generated_text)
     #print(cache.get_seq_length())
