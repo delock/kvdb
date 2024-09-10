@@ -25,3 +25,4 @@ for i in range(256):
     length = len(generated_text)
     #print(cache.get_seq_length())
     input_text = generated_text
+print('')
