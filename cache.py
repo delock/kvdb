@@ -161,13 +161,15 @@ class PersistentCache(Cache):
             # Empty cache
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
-            self.shift_attn_if_needed(key_states.shape[-2])
+            if layer_idx == 0:
+                self.shift_attn_if_needed(key_states.shape[-2])
 
         elif key_states.shape[-2] + self.get_seq_length(layer_idx) < self.window_length:
             # Growing cache
             self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
             self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
-            self.shift_attn_if_needed(key_states.shape[-2])
+            if layer_idx == 0:
+                self.shift_attn_if_needed(key_states.shape[-2])
 
         else:
             # Shifting cache
@@ -177,7 +179,6 @@ class PersistentCache(Cache):
 
             # Shifting attention sink if need to
             if layer_idx == 0:
-                shift_length = key_states.shape[-2] + self.attn_sink.shape[0] - self.attn_sink_length
                 self.shift_attn_if_needed(key_states.shape[-2])
 
             # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
