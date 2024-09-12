@@ -55,7 +55,9 @@ class PersistentCache(Cache):
         self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
 
         # attention sink of KV window elements
-        self.attn_sink = torch.zeros(window_length)
+        self.attn_sink = torch.zeros(self.window_length)
+        # real elements number in the attn_sink
+        self.attn_sink_length = 0
 
     @staticmethod
     def _rotate_half(x):
@@ -159,11 +161,13 @@ class PersistentCache(Cache):
             # Empty cache
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
+            self.shift_attn_if_needed(key_states.shape[-2])
 
         elif key_states.shape[-2] + self.get_seq_length(layer_idx) < self.window_length:
             # Growing cache
             self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
             self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
+            self.shift_attn_if_needed(key_states.shape[-2])
 
         else:
             # Shifting cache
@@ -173,9 +177,8 @@ class PersistentCache(Cache):
 
             # Shifting attention sink if need to
             if layer_idx == 0:
-                shift_length = key_states.shape[-2] + self.attn_sink.shape[0] - self.window_length
-                if shift_length > 0:
-                    self.attn_sink = F.pad(self.attn_sink[shift_length:], (0, shift_length))
+                shift_length = key_states.shape[-2] + self.attn_sink.shape[0] - self.attn_sink_length
+                self.shift_attn_if_needed(key_states.shape[-2])
 
             # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
             if using_rope:
@@ -203,15 +206,35 @@ class PersistentCache(Cache):
 
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
+    # returns how the overflow tokens needs to be shifted
+    # tuples of from->to
+    # i.e. ((4, 3)) --> shift position 4 to 3
+    # i.e. ((4, 2), (5, 3)) --> shift position 4 to 2, 5 to 3
+    def shift_attn_if_needed(self, new_token_length):
+        self.attn_sink_length += new_token_length
+        if new_token_length+self.attn_sink_length <= self.window_length-self.num_sink_tokens:
+            self.attn_sink = F.pad(self.attn_sink[new_token_length:], (0, new_token_length))
+            print (f"       *{self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+            return ()
+
+        # attn_sink already full, need to overflow
+        overflow = new_token_length+self.attn_sink_length - (self.window_length-self.num_sink_tokens)
+        print (f"       #{self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+        self.attn_sink = F.pad(torch.cat((self.attn_sink[0:self.num_sink_tokens], self.attn_sink[self.num_sink_tokens+new_token_length:]), 0), (0, new_token_length))
+        return ()
+        #print (f"after {self.attn_sink}")
+
+
     # accumulate attention so we may find high hitter
+    # note don't accumulate attention scores for items already in the sink
     def accumulate_attn(self, attn_weights, layer_idx, cache_kwargs):
         attn_score = attn_weights.sum((0, 1, 2))
         attn_size = attn_score.size()[-1]
-        pad_size = self.window_length - attn_size
+        pad_size = (self.window_length-self.num_sink_tokens) - attn_size
         if pad_size > 0:
             attn_score = F.pad(attn_score, (0, pad_size))
         elif pad_size < 0:
-            attn_score = attn_score[-self.window_length:]
-        self.attn_sink += attn_score
-        if layer_idx == 0:
-            print (layer_idx, self.attn_sink)
+            attn_score = attn_score[-(self.window_length-self.num_sink_tokens):]
+        self.attn_sink += F.pad(attn_score, (self.num_sink_tokens, 0))
+        #if layer_idx == 0:
+            #print (layer_idx, self.attn_sink)
