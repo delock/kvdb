@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from packaging import version
 from transformers import Cache
+import torch.nn.functional as F
 
 class PersistentCache(Cache):
     """
@@ -52,6 +53,9 @@ class PersistentCache(Cache):
         self._cos_cache = None
         self._sin_cache = None
         self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
+
+        # attention sink of KV window elements
+        self.attn_sink = torch.zeros(window_length)
 
     @staticmethod
     def _rotate_half(x):
@@ -167,6 +171,12 @@ class PersistentCache(Cache):
                 :, :, -self.window_length + self.num_sink_tokens + key_states.shape[-2] :
             ]
 
+            # Shifting attention sink if need to
+            if layer_idx == 0:
+                shift_length = key_states.shape[-2] + self.attn_sink.shape[0] - self.window_length
+                if shift_length > 0:
+                    self.attn_sink = F.pad(self.attn_sink[shift_length:], (0, shift_length))
+
             # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
             if using_rope:
                 rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin(
@@ -192,3 +202,16 @@ class PersistentCache(Cache):
             self.value_cache[layer_idx] = torch.cat([sink_values, values_to_keep, value_states], dim=-2)
 
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
+
+    # accumulate attention so we may find high hitter
+    def accumulate_attn(self, attn_weights, layer_idx, cache_kwargs):
+        attn_score = attn_weights.sum((0, 1, 2))
+        attn_size = attn_score.size()[-1]
+        pad_size = self.window_length - attn_size
+        if pad_size > 0:
+            attn_score = F.pad(attn_score, (0, pad_size))
+        elif pad_size < 0:
+            attn_score = attn_score[-self.window_length:]
+        self.attn_sink += attn_score
+        if layer_idx == 0:
+            print (layer_idx, self.attn_sink)

@@ -10,7 +10,7 @@ model = Phi3ForCausalLM.from_pretrained(model_name, attn_implementation="eager")
 # 输入文本
 input_text = "Continue the story with 500 words.  Long long ago there was a little girl lived in a land far far away.  One day"
 
-cache = PersistentCache(window_length=32, num_sink_tokens=4)
+cache = PersistentCache(window_length=37, num_sink_tokens=4)
 length = 0
 new_text = ''
 
