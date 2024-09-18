@@ -213,14 +213,14 @@ class PersistentCache(Cache):
     # i.e. ((4, 2), (5, 3)) --> shift position 4 to 2, 5 to 3
     def shift_attn_if_needed(self, new_token_length):
         self.attn_sink_length += new_token_length
-        if new_token_length+self.attn_sink_length <= self.window_length-self.num_sink_tokens:
+        if self.attn_sink_length <= self.window_length-self.num_sink_tokens:
             self.attn_sink = F.pad(self.attn_sink[new_token_length:], (0, new_token_length))
-            print (f"       *{self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+            print (f"       *{self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
             return ()
 
         # attn_sink already full, need to overflow
         overflow = new_token_length+self.attn_sink_length - (self.window_length-self.num_sink_tokens)
-        print (f"       #{self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+        print (f"       #{self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((self.attn_sink[0:self.num_sink_tokens], self.attn_sink[self.num_sink_tokens+new_token_length:]), 0), (0, new_token_length))
         return ()
         #print (f"after {self.attn_sink}")
