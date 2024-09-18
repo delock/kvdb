@@ -222,6 +222,7 @@ class PersistentCache(Cache):
         overflow = self.attn_sink_length - (self.window_length-self.num_sink_tokens)
         print (f"       # overflow {overflow} items, {self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((self.attn_sink[0:self.num_sink_tokens], self.attn_sink[self.num_sink_tokens+new_token_length:]), 0), (0, new_token_length))
+        self.attn_sink_length -= overflow
         return ()
         #print (f"after {self.attn_sink}")
 
