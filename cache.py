@@ -220,6 +220,12 @@ class PersistentCache(Cache):
 
         # attn_sink already full, need to overflow
         overflow = self.attn_sink_length - (self.window_length-self.num_sink_tokens)
+        # For each overflow token:
+        #     1. Find the item with smallest attention score among sink tokens
+        #     2. compare attention score of overflow token with the smallest attention score in sink
+        #     3. Replace the smallest attention score with the overflow token if the overflow token has higher attention score
+        #     4. If replace happens, add shift position tuple to the return list
+
         print (f"       # overflow {overflow} items, {self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((self.attn_sink[0:self.num_sink_tokens], self.attn_sink[self.num_sink_tokens+new_token_length:]), 0), (0, new_token_length))
         self.attn_sink_length -= overflow
