@@ -58,6 +58,8 @@ class PersistentCache(Cache):
         self.attn_sink = torch.zeros(self.window_length)
         # real elements number in the attn_sink
         self.attn_sink_length = 0
+        # self attn_sink shift tuples
+        self.attn_shift_tuples = []
 
     @staticmethod
     def _rotate_half(x):
@@ -156,30 +158,39 @@ class PersistentCache(Cache):
                     self._cos_cache = torch.cat([self._cos_cache, cos[0, ...]], dim=0)
                     self._sin_cache = torch.cat([self._sin_cache, sin[0, ...]], dim=0)
 
+        # Shifting attention sink if need to
+
         # [bsz, num_heads, seq_len, head_dim]
         if len(self.key_cache) <= layer_idx:
+            if layer_idx == 0:
+                self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
+                print (f"1. attn_shift_tuple = {self.attn_shift_tuple}")
+                assert (self.attn_shift_tuple == [])
             # Empty cache
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
-            if layer_idx == 0:
-                self.shift_attn_if_needed(key_states.shape[-2])
 
         elif key_states.shape[-2] + self.get_seq_length(layer_idx) < self.window_length:
+            if layer_idx == 0:
+                self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
+                print (f"2. attn_shift_tuple = {self.attn_shift_tuple}")
+                assert (self.attn_shift_tuple == [])
             # Growing cache
             self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
             self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], value_states], dim=-2)
-            if layer_idx == 0:
-                self.shift_attn_if_needed(key_states.shape[-2])
 
         else:
+            if layer_idx == 0:
+                self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
+                print (f"3. attn_shift_tuple = {self.attn_shift_tuple}")
+
+            # replace sink items according to shift_tuple
+            for fronn, to in self.attn_shift_tuple:
+                self.key_cache[layer_idx][:, :, to] = self.key_cache[layer_idx][:, :, fronn]
             # Shifting cache
             keys_to_keep = self.key_cache[layer_idx][
                 :, :, -self.window_length + self.num_sink_tokens + key_states.shape[-2] :
             ]
-
-            # Shifting attention sink if need to
-            if layer_idx == 0:
-                self.shift_attn_if_needed(key_states.shape[-2])
 
             # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
             if using_rope:
@@ -212,11 +223,12 @@ class PersistentCache(Cache):
     # i.e. ((4, 3)) --> shift position 4 to 3
     # i.e. ((4, 2), (5, 3)) --> shift position 4 to 2, 5 to 3
     def shift_attn_if_needed(self, new_token_length):
+        return_val = []
         self.attn_sink_length += new_token_length
         if self.attn_sink_length <= self.window_length-self.num_sink_tokens:
-            print (f"       *{self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+            #print (f"       *{self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
             self.attn_sink = F.pad(self.attn_sink[new_token_length:], (0, new_token_length))
-            return ()
+            return return_val
 
         # attn_sink already full, need to overflow
         overflow = self.attn_sink_length - (self.window_length-self.num_sink_tokens)
@@ -226,10 +238,22 @@ class PersistentCache(Cache):
         #     3. Replace the smallest attention score with the overflow token if the overflow token has higher attention score
         #     4. If replace happens, add shift position tuple to the return list
 
-        print (f"       # overflow {overflow} items, {self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+        print (f"       # overflow {overflow} items")
+        for i in range(overflow):
+            min_idx = self.attn_sink[0:self.num_sink_tokens].argmin()
+            print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
+            if self.attn_sink[min_idx] < self.attn_sink[i+self.num_sink_tokens]:
+                # replace attn_sink[min_idx] with attn_sink[i]
+                print ("                      replace")
+                self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
+                return_val.append((i+self.num_sink_tokens, min_idx))
+            else:
+                print ("                      drop")
+                pass
+        print (f", {self.attn_sink_length} {new_token_length} {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((self.attn_sink[0:self.num_sink_tokens], self.attn_sink[self.num_sink_tokens+new_token_length:]), 0), (0, new_token_length))
         self.attn_sink_length -= overflow
-        return ()
+        return return_val
         #print (f"after {self.attn_sink}")
 
 
