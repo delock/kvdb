@@ -170,7 +170,7 @@ class PersistentCache(Cache):
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
 
-        elif key_states.shape[-2] + self.get_seq_length(layer_idx) < self.window_length:
+        elif key_states.shape[-2] + self.get_seq_length(layer_idx) <= self.window_length:
             if layer_idx == 0:
                 self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
                 #print (f"2. attn_shift_tuple = {self.attn_shift_tuple}")
@@ -185,8 +185,8 @@ class PersistentCache(Cache):
                 #print (f"3. attn_shift_tuple = {self.attn_shift_tuple}")
 
             # replace sink items according to shift_tuple
-            for fronn, to in self.attn_shift_tuple:
-                self.key_cache[layer_idx][:, :, to] = self.key_cache[layer_idx][:, :, fronn]
+            #for fronn, to in self.attn_shift_tuple:
+                #self.key_cache[layer_idx][:, to, :] = self.key_cache[layer_idx][:, fronn, :]
             # Shifting cache
             keys_to_keep = self.key_cache[layer_idx][
                 :, :, -self.window_length + self.num_sink_tokens + key_states.shape[-2] :
@@ -228,7 +228,9 @@ class PersistentCache(Cache):
         #if self.attn_sink_length <= self.window_length-self.num_sink_tokens:
         if self.attn_sink_length <= self.window_length:
             #print (f"       *{self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
+            #print (f"vvvvvvvvvvvvvvvvvv\n{self.attn_sink_length}, {self.window_length}, {new_token_length}\nbefore {self.attn_sink}")
             self.attn_sink = F.pad(self.attn_sink[new_token_length:], (0, new_token_length))
+            #print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
             return return_val
 
         # attn_sink already full, need to overflow
@@ -243,20 +245,20 @@ class PersistentCache(Cache):
         #print (f"       # overflow {overflow} items")
         for i in range(overflow):
             min_idx = self.attn_sink[0:self.num_sink_tokens].argmin()
-            print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
+            #print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
             if self.attn_sink[min_idx] < self.attn_sink[i+self.num_sink_tokens]:
                 # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens]
-                print ("                      replace")
+                #print ("                      replace")
                 #print ("#", end="")
                 self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
                 return_val.append((i+self.num_sink_tokens, min_idx))
-        print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
+        #print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((
               self.attn_sink[0:self.num_sink_tokens],
               self.attn_sink[self.num_sink_tokens+new_token_length:]
               )), (0, new_token_length))
         self.attn_sink_length -= overflow
-        print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
+        #print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
         return return_val
 
 
@@ -267,7 +269,7 @@ class PersistentCache(Cache):
         attn_size = attn_score.size()[-1]
         pad_size = (self.window_length-self.num_sink_tokens) - attn_size
         if pad_size > 0:
-            attn_score = F.pad(attn_score, (0, pad_size))
+            attn_score = F.pad(attn_score, (pad_size, 0))
         elif pad_size < 0:
             attn_score = attn_score[-(self.window_length-self.num_sink_tokens):]
         attn_sink_size = self.attn_sink.size()[-1]
