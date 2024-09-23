@@ -243,18 +243,21 @@ class PersistentCache(Cache):
         #print (f"       # overflow {overflow} items")
         for i in range(overflow):
             min_idx = self.attn_sink[0:self.num_sink_tokens].argmin()
-            #print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
+            print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
             if self.attn_sink[min_idx] < self.attn_sink[i+self.num_sink_tokens]:
-                # replace attn_sink[min_idx] with attn_sink[i]
-                #print ("                      replace")
-                print ("#", end="")
+                # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens]
+                print ("                      replace")
+                #print ("#", end="")
                 self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
                 return_val.append((i+self.num_sink_tokens, min_idx))
-        #print (f", {self.attn_sink_length} {new_token_length} {self.attn_sink}")
-        self.attn_sink = F.pad(torch.cat((self.attn_sink[0:self.num_sink_tokens], self.attn_sink[self.num_sink_tokens+new_token_length:]), 0), (0, new_token_length))
+        print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
+        self.attn_sink = F.pad(torch.cat((
+              self.attn_sink[0:self.num_sink_tokens],
+              self.attn_sink[self.num_sink_tokens+new_token_length:]
+              )), (0, new_token_length))
         self.attn_sink_length -= overflow
+        print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
         return return_val
-        #print (f"after {self.attn_sink}")
 
 
     # accumulate attention so we may find high hitter
