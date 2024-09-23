@@ -185,8 +185,8 @@ class PersistentCache(Cache):
                 #print (f"3. attn_shift_tuple = {self.attn_shift_tuple}")
 
             # replace sink items according to shift_tuple
-            #for fronn, to in self.attn_shift_tuple:
-                #self.key_cache[layer_idx][:, to, :] = self.key_cache[layer_idx][:, fronn, :]
+            for fronn, to in self.attn_shift_tuple:
+                self.key_cache[layer_idx][:, :, to, :] = self.key_cache[layer_idx][:, :, fronn, :]
             # Shifting cache
             keys_to_keep = self.key_cache[layer_idx][
                 :, :, -self.window_length + self.num_sink_tokens + key_states.shape[-2] :
