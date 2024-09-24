@@ -24,6 +24,8 @@ class PersistentCache(Cache):
             The length of the context window.
         num_sink_tokens (`int`):
             The number of sink tokens. See the original paper for more information.
+        replace_sink_tokens (`int`):
+            The number of sink tokens that could be replaced by high score kv entry.
 
     Example:
 
@@ -43,12 +45,13 @@ class PersistentCache(Cache):
         ```
     """
 
-    def __init__(self, window_length: int, num_sink_tokens: int) -> None:
+    def __init__(self, window_length: int, num_sink_tokens: int, replace_sink_tokens: int) -> None:
         super().__init__()
         self.key_cache: List[torch.Tensor] = []
         self.value_cache: List[torch.Tensor] = []
         self.window_length = window_length
         self.num_sink_tokens = num_sink_tokens
+        self.replace_sink_tokens = replace_sink_tokens
         self.cos_sin_rerotation_cache = {}
         self._cos_cache = None
         self._sin_cache = None
@@ -234,6 +237,9 @@ class PersistentCache(Cache):
             #print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
             return return_val
 
+        if self.replace_sink_tokens == 0:
+            return return_val
+
         # attn_sink already full, need to overflow
         #overflow = self.attn_sink_length - (self.window_length-self.num_sink_tokens)
         overflow = self.attn_sink_length - self.window_length
@@ -244,8 +250,9 @@ class PersistentCache(Cache):
         #     4. If replace happens, add shift position tuple to the return list
 
         #print (f"       # overflow {overflow} items")
+        assert(self.replace_sink_tokens <= self.num_sink_tokens and self.replace_sink_tokens > 0)
         for i in range(overflow):
-            min_idx = self.attn_sink[0:self.num_sink_tokens].argmin()
+            min_idx = self.attn_sink[self.num_sink_tokens-self.replace_sink_tokens:self.num_sink_tokens].argmin()
             #print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
             if self.attn_sink[min_idx] < self.attn_sink[i+self.num_sink_tokens]:
                 # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens]
