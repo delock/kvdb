@@ -58,23 +58,29 @@ prompts = [
 total_ppl = 1
 total_ppl_ref = 1
 for prompt in prompts:
-    cache = PersistentCache(window_length=64, num_sink_tokens=4)
-    #cache_ref = DynamicCache()
+    cache = PersistentCache(window_length=32, num_sink_tokens=1)
+    if debug:
+        cache_ref = DynamicCache()
     print('Generating text for test configuration')
     result = gen_text(prompt, model, tokenizer, cache)
-    #print('Generating text for reference(default) configuration')
-    #result_ref = gen_text(prompt, model_ref, tokenizer, cache_ref)
+    if debug:
+        print('Generating text for reference(default) configuration')
+        result_ref = gen_text(prompt, model_ref, tokenizer, cache_ref)
     print('Compute cross perplexity for test configuration against reference configuration')
     ppl = cross_perplexity(result, model_ref, tokenizer)
-    #print('Compute self perplexity for reference configuration against itself')
-    #ppl_ref = cross_perplexity(result_ref, model_ref, tokenizer)
-    print(f'result={result}')
-    #print(f'result_ref={result_ref}')
-    print(f'ppl={ppl}')
-    #print(f'ppl_ref={ppl_ref}')
+    if debug:
+        print('Compute self perplexity for reference configuration against itself')
+        ppl_ref = cross_perplexity(result_ref, model_ref, tokenizer)
+    if debug:
+        print(f'result={result}')
+        print(f'result_ref={result_ref}')
+        print(f'ppl={ppl}')
+        print(f'ppl_ref={ppl_ref}')
     total_ppl *= ppl
-    #total_ppl_ref *= ppl_ref
+    if debug:
+        total_ppl_ref *= ppl_ref
 
 print(f'==============================================')
 print(f'geomean ppl = {total_ppl**(1/len(prompts))}')
-#print(f'geomean ppl_ref = {total_ppl_ref**(1/len(prompts))}')
+if debug:
+    print(f'geomean ppl_ref = {total_ppl_ref**(1/len(prompts))}')
