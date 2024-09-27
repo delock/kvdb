@@ -58,7 +58,7 @@ prompts = [
 total_ppl = 1
 total_ppl_ref = 1
 for prompt in prompts:
-    cache = PersistentCache(window_length=128, num_sink_tokens=72, replace_sink_tokens=20)
+    cache = PersistentCache(window_length=32, num_sink_tokens=8, replace_sink_tokens=2)
     if debug:
         cache_ref = DynamicCache()
     print('Generating text for test configuration')

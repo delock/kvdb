@@ -77,7 +77,7 @@ class PersistentCache(Cache):
         return rotated_key_states
 
     def _get_rerotation_cos_sin(
-        self, key_states: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+        self, key_states: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, attn_shift: Tuple[int, int]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if key_states.shape[-2] not in self.cos_sin_rerotation_cache:
             # Upcast to float32 temporarily for better accuracy
@@ -199,8 +199,8 @@ class PersistentCache(Cache):
             # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
             if using_rope:
                 rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin(
-                    key_states, self._cos_cache[: self.window_length], self._sin_cache[: self.window_length]
-                )
+                    key_states, self._cos_cache[: self.window_length], self._sin_cache[: self.window_length],
+                self.attn_shift_tuple)
                 if partial_rotation_size is not None:
                     keys_to_keep, keys_pass = (
                         keys_to_keep[..., :partial_rotation_size],
