@@ -77,9 +77,30 @@ class PersistentCache(Cache):
         return rotated_key_states
 
     def _get_rerotation_cos_sin(
-        self, key_states: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, attn_shift: Tuple[int, int]
+        self, key_states: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if key_states.shape[-2] not in self.cos_sin_rerotation_cache:
+            # Upcast to float32 temporarily for better accuracy
+            cos = cos.to(torch.float32)
+            sin = sin.to(torch.float32)
+
+            # Compute the cos and sin required for back- and forward-rotating to one position earlier in the sequence
+            original_cos = cos[self.num_sink_tokens + key_states.shape[-2] :]
+            shifted_cos = cos[self.num_sink_tokens : -key_states.shape[-2]]
+            original_sin = sin[self.num_sink_tokens + key_states.shape[-2] :]
+            shifted_sin = sin[self.num_sink_tokens : -key_states.shape[-2]]
+            rerotation_cos = original_cos * shifted_cos + original_sin * shifted_sin
+            rerotation_sin = -original_sin * shifted_cos + original_cos * shifted_sin
+
+            self.cos_sin_rerotation_cache[key_states.shape[-2]] = (
+                rerotation_cos.to(key_states.dtype).unsqueeze(0),
+                rerotation_sin.to(key_states.dtype).unsqueeze(0),
+            )
+        return self.cos_sin_rerotation_cache[key_states.shape[-2]]
+
+    def _get_rerotation_cos_sin2(
+        self, shift_length: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
             # Upcast to float32 temporarily for better accuracy
             cos = cos.to(torch.float32)
             sin = sin.to(torch.float32)
@@ -191,6 +212,15 @@ class PersistentCache(Cache):
             for fronn, to in self.attn_shift_tuple:
                 self.key_cache[layer_idx][:, :, to, :] = self.key_cache[layer_idx][:, :, fronn, :]
                 self.value_cache[layer_idx][:, :, to, :] = self.value_cache[layer_idx][:, :, fronn, :]
+
+                # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
+                if using_rope:
+                    rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin2(
+                        fronn-to, self._cos_cache[: fronn], self._sin_cache[: fronn],
+                    self.attn_shift_tuple)
+
+
+
             # Shifting cache
             keys_to_keep = self.key_cache[layer_idx][
                 :, :, -self.window_length + self.num_sink_tokens + key_states.shape[-2] :
