@@ -223,8 +223,9 @@ class PersistentCache(Cache):
                         fronn, to, self._cos_cache[: fronn], self._sin_cache[: fronn], key_states)
                     keys_to_keep = self.key_cache[layer_idx][:, :, to, :].unsqueeze(2)
                     keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
+                    #print (f"keys_to_keep {keys_to_keep.squeeze(2).size()} {self.key_cache[layer_idx][:, :, :to, :].size()}, {self.key_cache[layer_idx][:, :, to+1:, :].size()}")
                     self.key_cache[layer_idx] = torch.cat(
-                        [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep.squeeze(2), self.key_cache[layer_idx][:, :, to + 1 :, :]],
+                        [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep, self.key_cache[layer_idx][:, :, to + 1 :, :]],
                         dim=-2,
                     )
 
