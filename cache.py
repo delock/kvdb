@@ -53,6 +53,7 @@ class PersistentCache(Cache):
         self.num_sink_tokens = num_sink_tokens
         self.replace_sink_tokens = replace_sink_tokens
         self.cos_sin_rerotation_cache = {}
+        self.cos_sin_rerotation_cache2 = {}
         self._cos_cache = None
         self._sin_cache = None
         self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
@@ -99,25 +100,28 @@ class PersistentCache(Cache):
         return self.cos_sin_rerotation_cache[key_states.shape[-2]]
 
     def _get_rerotation_cos_sin2(
-        self, shift_length: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+        self, fronn: int, to: int, cos: torch.Tensor, sin: torch.Tensor, key_states
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        shift = fronn - to
+
+        if shift not in self.cos_sin_rerotation_cache2:
             # Upcast to float32 temporarily for better accuracy
             cos = cos.to(torch.float32)
             sin = sin.to(torch.float32)
 
             # Compute the cos and sin required for back- and forward-rotating to one position earlier in the sequence
-            original_cos = cos[self.num_sink_tokens + key_states.shape[-2] :]
-            shifted_cos = cos[self.num_sink_tokens : -key_states.shape[-2]]
-            original_sin = sin[self.num_sink_tokens + key_states.shape[-2] :]
-            shifted_sin = sin[self.num_sink_tokens : -key_states.shape[-2]]
+            original_cos = cos[shift :]
+            shifted_cos = cos[0 : -shift]
+            original_sin = sin[shift :]
+            shifted_sin = sin[0 : -shift]
             rerotation_cos = original_cos * shifted_cos + original_sin * shifted_sin
             rerotation_sin = -original_sin * shifted_cos + original_cos * shifted_sin
 
-            self.cos_sin_rerotation_cache[key_states.shape[-2]] = (
+            self.cos_sin_rerotation_cache2[shift] = (
                 rerotation_cos.to(key_states.dtype).unsqueeze(0),
                 rerotation_sin.to(key_states.dtype).unsqueeze(0),
             )
-        return self.cos_sin_rerotation_cache[key_states.shape[-2]]
+        return self.cos_sin_rerotation_cache2[shift]
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         """Returns the sequence length of the cached states. A layer index can be optionally passed."""
@@ -210,14 +214,19 @@ class PersistentCache(Cache):
 
             # replace sink items according to shift_tuple
             for fronn, to in self.attn_shift_tuple:
+                # On RoPE models, we need to recompute the key rotation as the tokens are shifted
                 self.key_cache[layer_idx][:, :, to, :] = self.key_cache[layer_idx][:, :, fronn, :]
                 self.value_cache[layer_idx][:, :, to, :] = self.value_cache[layer_idx][:, :, fronn, :]
 
-                # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
                 if using_rope:
                     rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin2(
-                        fronn-to, self._cos_cache[: fronn], self._sin_cache[: fronn],
-                    self.attn_shift_tuple)
+                        fronn, to, self._cos_cache[: fronn], self._sin_cache[: fronn], key_states)
+                    keys_to_keep = self.key_cache[layer_idx][:, :, to, :].unsqueeze(2)
+                    keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
+                    self.key_cache[layer_idx] = torch.cat(
+                        [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep.squeeze(2), self.key_cache[layer_idx][:, :, to + 1 :, :]],
+                        dim=-2,
+                    )
 
 
 
@@ -229,8 +238,7 @@ class PersistentCache(Cache):
             # On RoPE models, we need to recompute the Key rotation as the tokens are shifted
             if using_rope:
                 rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin(
-                    key_states, self._cos_cache[: self.window_length], self._sin_cache[: self.window_length],
-                self.attn_shift_tuple)
+                    key_states, self._cos_cache[: self.window_length], self._sin_cache[: self.window_length])
                 if partial_rotation_size is not None:
                     keys_to_keep, keys_pass = (
                         keys_to_keep[..., :partial_rotation_size],
