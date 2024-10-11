@@ -215,19 +215,19 @@ class PersistentCache(Cache):
             # replace sink items according to shift_tuple
             for fronn, to in self.attn_shift_tuple:
                 # On RoPE models, we need to recompute the key rotation as the tokens are shifted
-                self.key_cache[layer_idx][:, :, to, :] = self.key_cache[layer_idx][:, :, fronn, :]
-                self.value_cache[layer_idx][:, :, to, :] = self.value_cache[layer_idx][:, :, fronn, :]
-
                 if using_rope:
                     rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin2(
-                        fronn, to, self._cos_cache[: fronn], self._sin_cache[: fronn], key_states)
-                    keys_to_keep = self.key_cache[layer_idx][:, :, to, :].unsqueeze(2)
+                        fronn, to, self._cos_cache[to: fronn+1], self._sin_cache[to: fronn+1], key_states)
+                    keys_to_keep = self.key_cache[layer_idx][:, :, fronn, :].unsqueeze(2)
+                    #print(f'fronn {fronn} to {to} rerotation_cos {rerotation_cos.size()} rerotation_sin {rerotation_sin.size()} keys_to_keep {keys_to_keep.size()}')
                     keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
-                    #print (f"keys_to_keep {keys_to_keep.squeeze(2).size()} {self.key_cache[layer_idx][:, :, :to, :].size()}, {self.key_cache[layer_idx][:, :, to+1:, :].size()}")
                     self.key_cache[layer_idx] = torch.cat(
                         [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep, self.key_cache[layer_idx][:, :, to + 1 :, :]],
                         dim=-2,
                     )
+                else:
+                    self.key_cache[layer_idx][:, :, to, :] = self.key_cache[layer_idx][:, :, fronn, :]
+                self.value_cache[layer_idx][:, :, to, :] = self.value_cache[layer_idx][:, :, fronn, :]
 
 
 
@@ -245,6 +245,7 @@ class PersistentCache(Cache):
                         keys_to_keep[..., :partial_rotation_size],
                         keys_to_keep[..., partial_rotation_size:],
                     )
+                #print(f'rerotation_cos {rerotation_cos.size()} rerotation_sin {rerotation_sin.size()} keys_to_keep {keys_to_keep.size()}')
                 keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
                 if partial_rotation_size is not None:
                     keys_to_keep = torch.cat((keys_to_keep, keys_pass), dim=-1)
@@ -291,14 +292,14 @@ class PersistentCache(Cache):
         #print (f"       # overflow {overflow} items")
         assert(self.replace_sink_tokens <= self.num_sink_tokens and self.replace_sink_tokens > 0)
         for i in range(overflow):
-            min_idx = self.attn_sink[self.num_sink_tokens-self.replace_sink_tokens:self.num_sink_tokens].argmin()
+            min_idx = self.attn_sink[self.num_sink_tokens-self.replace_sink_tokens:self.num_sink_tokens].argmin() + self.num_sink_tokens - self.replace_sink_tokens
             #print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
             if self.attn_sink[min_idx] < self.attn_sink[i+self.num_sink_tokens]:
                 # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens]
                 #print ("                      replace")
                 #print ("#", end="")
                 self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
-                return_val.append((i+self.num_sink_tokens, min_idx+self.num_sink_tokens-self.replace_sink_tokens))
+                return_val.append((i+self.num_sink_tokens, min_idx))
         #print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((
               self.attn_sink[0:self.num_sink_tokens],
