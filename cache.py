@@ -298,7 +298,7 @@ class PersistentCache(Cache):
                 #print ("                      replace")
                 #print ("#", end="")
                 self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
-                return_val.append((i+self.num_sink_tokens, min_idx))
+                return_val.append((i+self.num_sink_tokens, min_idx+self.num_sink_tokens-self.replace_sink_tokens))
         #print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((
               self.attn_sink[0:self.num_sink_tokens],

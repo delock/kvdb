@@ -69,7 +69,7 @@ model_ref = AutoModelForCausalLM.from_pretrained(model_name, attn_implementation
 
 # Input text
 prompts = [
-          "Earth, mostly harmless,",
+          #"Earth, mostly harmless,",
           "Long long ago there was a little girl lived in a land far far away.  One day",
           ]
 
@@ -77,28 +77,30 @@ total_ppl = 1
 total_ppl_ref = 1
 for prompt in prompts:
     cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size)
-    if debug or ref:
+    if ref:
         cache_ref = DynamicCache()
     print('Generating text for test configuration')
     result = gen_text(prompt, model, tokenizer, cache)
-    if debug or ref:
+    if ref:
         print('Generating text for reference(default) configuration')
         result_ref = gen_text(prompt, model_ref, tokenizer, cache_ref)
     print('Compute cross perplexity for test configuration against reference configuration')
     ppl = cross_perplexity(result, model_ref, tokenizer)
-    if debug or ref:
+    if ref:
         print('Compute self perplexity for reference configuration against itself')
         ppl_ref = cross_perplexity(result_ref, model_ref, tokenizer)
     if debug:
         print(f'result={result}')
-        print(f'result_ref={result_ref}')
+        if ref:
+            print(f'result_ref={result_ref}')
         print(f'ppl={ppl}')
-        print(f'ppl_ref={ppl_ref}')
+        if ref:
+            print(f'ppl_ref={ppl_ref}')
     total_ppl *= ppl
-    if debug or ref:
+    if ref:
         total_ppl_ref *= ppl_ref
 
 print(f'==============================================')
 print(f'geomean ppl = {total_ppl**(1/len(prompts))}')
-if debug or ref:
+if ref:
     print(f'geomean ppl_ref = {total_ppl_ref**(1/len(prompts))}')
