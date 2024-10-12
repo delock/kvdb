@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from cache import PersistentCache
 from transformers.cache_utils import DynamicCache, SinkCache
@@ -46,18 +47,58 @@ def gen_text(input_text, model, tokenizer, cache):
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     return generated_text
 
-def cross_perplexity(input_text, model, tokenizer):
+def cross_perplexity2(input_text, model, tokenizer):
     # Compute cross perplexity
     inputs = tokenizer(input_text, return_tensors="pt")
     input_ids = inputs['input_ids']
 
     # Get the model's output logits and calculate log-likelihood
     with torch.no_grad():
-        outputs = model_ref(input_ids, labels=input_ids)
+        outputs = model(input_ids, labels=input_ids)
         loss = outputs.loss  # Cross entropy loss (negative log-likelihood)
 
     # Compute perplexity
     perplexity = torch.exp(loss)
+    return perplexity.item()
+
+def cross_perplexity3(input_text, model, tokenizer, cache=None):
+    # Compute cross perplexity
+    inputs = tokenizer(input_text, return_tensors="pt")
+    input_ids = inputs['input_ids']
+
+    # Get the model's output logits and calculate log-likelihood
+    with torch.no_grad():
+        outputs = model(input_ids, labels=input_ids, past_key_values=cache)
+        loss = outputs.loss  # Cross entropy loss (negative log-likelihood)
+
+    # Compute perplexity
+    perplexity = torch.exp(loss)
+    return perplexity.item()
+
+def cross_perplexity(input_text, model, tokenizer, cache=None):
+    # Compute average cross perplexity over each decode step
+    inputs = tokenizer(input_text, return_tensors="pt")
+    input_ids = inputs['input_ids']
+    total_loss = 0.0
+    num_tokens = 0
+
+    with torch.no_grad():
+        for i in tqdm(range(1, input_ids.size(1))):
+            # Slice input to predict the next token step by step
+            input_slice = input_ids[:, i-1].unsqueeze(1)
+            label = input_ids[:, i]
+
+            # print input_slice and labsls size
+            outputs = model(input_slice, past_key_values=cache)
+            step_loss = F.cross_entropy(outputs.logits[:, -1, :], label, reduction='mean')
+            if i > 5:
+                total_loss += step_loss
+                num_tokens += 1
+
+    # Compute average perplexity
+    average_loss = total_loss / num_tokens
+    perplexity = torch.exp(average_loss)
+    print(f"Average loss: {average_loss}, Perplexity: {perplexity}")
     return perplexity.item()
 
 # load model and tokenizer
@@ -73,6 +114,12 @@ prompts = [
           "Long long ago there was a little girl lived in a land far far away.  One day",
           ]
 
+text = "Long long ago there was a little girl lived in a land far far away.  One day she went to the forest to pick some flowers.  She saw a rabbit hopping around and she followed it.  The rabbit led her to a magical place where she met a fairy.  The fairy told her that she was the chosen one to save the kingdom from the evil witch."
+cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size)
+cache_ref = DynamicCache()
+ppl = cross_perplexity(text, model, tokenizer, cache)
+
+'''
 total_ppl = 1
 total_ppl_ref = 1
 for prompt in prompts:
@@ -85,7 +132,7 @@ for prompt in prompts:
         print('Generating text for reference(default) configuration')
         result_ref = gen_text(prompt, model_ref, tokenizer, cache_ref)
     print('Compute cross perplexity for test configuration against reference configuration')
-    ppl = cross_perplexity(result, model_ref, tokenizer)
+    ppl = cross_perplexity(result, model, tokenizer, cache)
     if ref:
         print('Compute self perplexity for reference configuration against itself')
         ppl_ref = cross_perplexity(result_ref, model_ref, tokenizer)
@@ -104,3 +151,4 @@ print(f'==============================================')
 print(f'geomean ppl = {total_ppl**(1/len(prompts))}')
 if ref:
     print(f'geomean ppl_ref = {total_ppl_ref**(1/len(prompts))}')
+'''
