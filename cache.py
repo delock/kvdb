@@ -104,7 +104,7 @@ class PersistentCache(Cache):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         shift = fronn - to
 
-        if shift not in self.cos_sin_rerotation_cache2:
+        if (fronn, to) not in self.cos_sin_rerotation_cache2:
             # Upcast to float32 temporarily for better accuracy
             cos = cos.to(torch.float32)
             sin = sin.to(torch.float32)
@@ -117,11 +117,11 @@ class PersistentCache(Cache):
             rerotation_cos = original_cos * shifted_cos + original_sin * shifted_sin
             rerotation_sin = -original_sin * shifted_cos + original_cos * shifted_sin
 
-            self.cos_sin_rerotation_cache2[shift] = (
+            self.cos_sin_rerotation_cache2[(fronn, to)] = (
                 rerotation_cos.to(dtype).unsqueeze(0),
                 rerotation_sin.to(dtype).unsqueeze(0),
             )
-        return self.cos_sin_rerotation_cache2[shift]
+        return self.cos_sin_rerotation_cache2[(fronn, to)]
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
         """Returns the sequence length of the cached states. A layer index can be optionally passed."""
@@ -301,8 +301,13 @@ class PersistentCache(Cache):
                 # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens]
                 #print ("                      replace")
                 #print ("#", end="")
-                self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
-                return_val.append((i+self.num_sink_tokens, min_idx))
+                for i in range(min_idx+1, self.num_sink_tokens):
+                    self.attn_sink[i-1] = self.attn_sink[i]
+                    return_val.append((i, i-1))
+                self.attn_sink[self.num_sink_tokens-1] = self.attn_sink[i+self.num_sink_tokens]
+                return_val.append((i+self.num_sink_tokens, self.num_sink_tokens-1))
+                #self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
+                #return_val.append((i+self.num_sink_tokens, min_idx))
         #print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((
               self.attn_sink[0:self.num_sink_tokens],
