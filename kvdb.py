@@ -126,7 +126,7 @@ else:
     dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
     text = '\n\n'.join(dataset["text"])
     if not args.full:
-        text = text[:5000]
+        text = text[:1500]
 if args.debug:
     print(f'text={text}')
 
