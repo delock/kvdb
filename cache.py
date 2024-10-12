@@ -100,7 +100,7 @@ class PersistentCache(Cache):
         return self.cos_sin_rerotation_cache[key_states.shape[-2]]
 
     def _get_rerotation_cos_sin2(
-        self, fronn: int, to: int, cos: torch.Tensor, sin: torch.Tensor, key_states
+        self, fronn: int, to: int, cos: torch.Tensor, sin: torch.Tensor, dtype
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         shift = fronn - to
 
@@ -118,8 +118,8 @@ class PersistentCache(Cache):
             rerotation_sin = -original_sin * shifted_cos + original_cos * shifted_sin
 
             self.cos_sin_rerotation_cache2[shift] = (
-                rerotation_cos.to(key_states.dtype).unsqueeze(0),
-                rerotation_sin.to(key_states.dtype).unsqueeze(0),
+                rerotation_cos.to(dtype).unsqueeze(0),
+                rerotation_sin.to(dtype).unsqueeze(0),
             )
         return self.cos_sin_rerotation_cache2[shift]
 
@@ -134,6 +134,17 @@ class PersistentCache(Cache):
     def get_max_length(self) -> Optional[int]:
         """Returns the maximum sequence length of the cached states."""
         return self.window_length
+
+    def shift_cache(self, layer_idx, fronn, to, dtype):
+        rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin2(
+            fronn, to, self._cos_cache[to: fronn+1], self._sin_cache[to: fronn+1], dtype)
+        keys_to_keep = self.key_cache[layer_idx][:, :, fronn, :].unsqueeze(2)
+        #print(f'fronn {fronn} to {to} rerotation_cos {rerotation_cos.size()} rerotation_sin {rerotation_sin.size()} keys_to_keep {keys_to_keep.size()}')
+        keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
+        self.key_cache[layer_idx] = torch.cat(
+            [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep, self.key_cache[layer_idx][:, :, to + 1 :, :]],
+            dim=-2,
+        )
 
     def update(
         self,
@@ -216,15 +227,7 @@ class PersistentCache(Cache):
             for fronn, to in self.attn_shift_tuple:
                 # On RoPE models, we need to recompute the key rotation as the tokens are shifted
                 if using_rope:
-                    rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin2(
-                        fronn, to, self._cos_cache[to: fronn+1], self._sin_cache[to: fronn+1], key_states)
-                    keys_to_keep = self.key_cache[layer_idx][:, :, fronn, :].unsqueeze(2)
-                    #print(f'fronn {fronn} to {to} rerotation_cos {rerotation_cos.size()} rerotation_sin {rerotation_sin.size()} keys_to_keep {keys_to_keep.size()}')
-                    keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
-                    self.key_cache[layer_idx] = torch.cat(
-                        [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep, self.key_cache[layer_idx][:, :, to + 1 :, :]],
-                        dim=-2,
-                    )
+                    self.shift_cache(layer_idx, fronn, to, key_states.dtype)
                 else:
                     self.key_cache[layer_idx][:, :, to, :] = self.key_cache[layer_idx][:, :, fronn, :]
                 self.value_cache[layer_idx][:, :, to, :] = self.value_cache[layer_idx][:, :, fronn, :]
