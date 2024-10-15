@@ -116,7 +116,7 @@ model_ref = AutoModelForCausalLM.from_pretrained(model_name, attn_implementation
 
 # Input text
 prompts = [
-          "Long long ago there was a little girl lived in a land far far away.  One day",
+          "Continue the story with 500 words: Long long ago there was a little girl lived in a land far far away.  One day\nAssistant:",
           ]
 
 if args.fast:
@@ -127,8 +127,6 @@ else:
     text = '\n\n'.join(dataset["text"])
     if not args.full:
         text = text[:1500]
-if args.debug:
-    print(f'text={text}')
 
 if args.ref:
     cache = DynamicCache()
@@ -136,7 +134,6 @@ else:
     cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size)
 ppl = perplexity(text, model, tokenizer, cache)
 
-'''
 if args.debug:
     total_ppl = 1
     for prompt in prompts:
@@ -144,11 +141,10 @@ if args.debug:
         print('Generating text for test configuration')
         result = gen_text(prompt, model, tokenizer, cache)
         print('Compute cross perplexity for test configuration against reference configuration')
-        ppl = cross_perplexity(result, model, tokenizer, cache)
+        ppl = cross_perplexity2(result, model, tokenizer)
         print(f'result={result}')
         print(f'ppl={ppl}')
         total_ppl *= ppl
 
     print(f'==============================================')
     print(f'geomean ppl = {total_ppl**(1/len(prompts))}')
-'''
