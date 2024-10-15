@@ -45,7 +45,7 @@ class PersistentCache(Cache):
         ```
     """
 
-    def __init__(self, window_length: int, num_sink_tokens: int, replace_sink_tokens: int) -> None:
+    def __init__(self, window_length: int, num_sink_tokens: int, replace_sink_tokens: int, regression=1.0) -> None:
         super().__init__()
         self.key_cache: List[torch.Tensor] = []
         self.value_cache: List[torch.Tensor] = []
@@ -64,6 +64,8 @@ class PersistentCache(Cache):
         self.attn_sink_length = 0
         # self attn_sink shift tuples
         self.attn_shift_tuples = []
+        # make attention score in sink degredate after each iteration so they get higher chance to be replaced
+        self.regression = regression
 
     @staticmethod
     def _rotate_half(x):
@@ -315,6 +317,9 @@ class PersistentCache(Cache):
               )), (0, new_token_length))
         self.attn_sink_length -= overflow
         #print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
+        #degredate attention scores
+        for i in range(self.num_sink_tokens):
+            self.attn_sink[i] *= self.regression
         return return_val
 
 

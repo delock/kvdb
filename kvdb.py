@@ -26,6 +26,7 @@ parser.add_argument('--fast', action='store_true', default=False)
 parser.add_argument('--sink_size', type=int, default=8)
 parser.add_argument('--window_length', type=int, default=32)
 parser.add_argument('--replace_sink_size', type=int, default=4)
+parser.add_argument('--regression', type=float, default=1.0)
 args = parser.parse_args()
 
 debug = args.debug
@@ -39,20 +40,11 @@ def gen_text(input_text, model, tokenizer, cache):
     input_tokens = inputs['input_ids']
     for i in tqdm(range(256)):
         outputs = model.generate(input_tokens, max_new_tokens=1, use_cache=True, num_return_sequences=1, past_key_values=cache)
-        #if debug:
-            #generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            #new_text = generated_text[length:]
-            #if length == 0:
-                #print('----------------------------')
-            #print(new_text, end='', flush=True)
-            #length = len(generated_text)
         input_tokens = outputs
-    #if debug:
-        #print('')
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     return generated_text
 
-def cross_perplexity2(input_text, model, tokenizer):
+def cross_perplexity(input_text, model, tokenizer):
     # Compute cross perplexity
     inputs = tokenizer(input_text, return_tensors="pt")
     input_ids = inputs['input_ids']
@@ -60,20 +52,6 @@ def cross_perplexity2(input_text, model, tokenizer):
     # Get the model's output logits and calculate log-likelihood
     with torch.no_grad():
         outputs = model(input_ids, labels=input_ids)
-        loss = outputs.loss  # Cross entropy loss (negative log-likelihood)
-
-    # Compute perplexity
-    perplexity = torch.exp(loss)
-    return perplexity.item()
-
-def cross_perplexity3(input_text, model, tokenizer, cache=None):
-    # Compute cross perplexity
-    inputs = tokenizer(input_text, return_tensors="pt")
-    input_ids = inputs['input_ids']
-
-    # Get the model's output logits and calculate log-likelihood
-    with torch.no_grad():
-        outputs = model(input_ids, labels=input_ids, past_key_values=cache)
         loss = outputs.loss  # Cross entropy loss (negative log-likelihood)
 
     # Compute perplexity
@@ -131,17 +109,17 @@ else:
 if args.ref:
     cache = DynamicCache()
 else:
-    cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size)
+    cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size, regression=args.regression)
 ppl = perplexity(text, model, tokenizer, cache)
 
 if args.debug:
     total_ppl = 1
     for prompt in prompts:
-        cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size)
+        cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size, regression=args.regression)
         print('Generating text for test configuration')
         result = gen_text(prompt, model, tokenizer, cache)
         print('Compute cross perplexity for test configuration against reference configuration')
-        ppl = cross_perplexity2(result, model, tokenizer)
+        ppl = cross_perplexity(result, model, tokenizer)
         print(f'result={result}')
         print(f'ppl={ppl}')
         total_ppl *= ppl
