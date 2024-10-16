@@ -1,9 +1,9 @@
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from cache import PersistentCache
+from cache import SinkCacheExt
 from datasets import load_dataset
-from transformers.cache_utils import DynamicCache, SinkCache
+from transformers.cache_utils import DynamicCache
 from modeling_phi3 import Phi3ForCausalLM
 from tqdm import tqdm
 import argparse
@@ -94,28 +94,15 @@ model_ref = AutoModelForCausalLM.from_pretrained(model_name, attn_implementation
 
 # Input text
 prompts = [
-          "Continue the story with 500 words: Long long ago there was a little girl lived in a land far far away.  One day\nAssistant:",
+          "Continue the story with 500 words: Long long ago there was a little girl lived in a land far far away.\nAssistant:",
+          "Continue the story with 500 words: Everything we cherished will perish.\nAssistant:",
+          "Continue the story with 500 words: Planet Earth: Harmless (mostly).\nAssistant:",
           ]
-
-if args.fast:
-    text = "Long long ago there was a little girl lived in a land far far away.  One day she went to the forest to pick some flowers.  She saw a rabbit hopping around and she followed it.  The rabbit led her to a magical place where she met a fairy.  The fairy told her that she was the chosen one to save the kingdom from the evil witch."
-else:
-    # Load the WikiText dataset
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    text = '\n\n'.join(dataset["text"])
-    if not args.full:
-        text = text[:1500]
-
-if args.ref:
-    cache = DynamicCache()
-else:
-    cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size, regression=args.regression)
-ppl = perplexity(text, model, tokenizer, cache)
 
 if args.debug:
     total_ppl = 1
     for prompt in prompts:
-        cache = PersistentCache(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size, regression=args.regression)
+        cache = SinkCacheExt(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size, regression=args.regression)
         print('Generating text for test configuration')
         result = gen_text(prompt, model, tokenizer, cache)
         print('Compute cross perplexity for test configuration against reference configuration')
@@ -126,3 +113,19 @@ if args.debug:
 
     print(f'==============================================')
     print(f'geomean ppl = {total_ppl**(1/len(prompts))}')
+
+else:
+    if args.fast:
+        text = "Long long ago there was a little girl lived in a land far far away.  One day she went to the forest to pick some flowers.  She saw a rabbit hopping around and she followed it.  The rabbit led her to a magical place where she met a fairy.  The fairy told her that she was the chosen one to save the kingdom from the evil witch."
+    else:
+        # Load the WikiText dataset
+        dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+        text = '\n\n'.join(dataset["text"])
+        if not args.full:
+            text = text[:1500]
+
+    if args.ref:
+        cache = DynamicCache()
+    else:
+        cache = SinkCacheExt(window_length=args.window_length, num_sink_tokens=args.sink_size, replace_sink_tokens=args.replace_sink_size, regression=args.regression)
+    ppl = perplexity(text, model, tokenizer, cache)

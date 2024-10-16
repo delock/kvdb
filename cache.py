@@ -10,7 +10,7 @@ from packaging import version
 from transformers import Cache
 import torch.nn.functional as F
 
-class PersistentCache(Cache):
+class SinkCacheExt(Cache):
     """
     A cache that as described in the [Attention Sinks paper](https://arxiv.org/abs/2309.17453). It allows the model to
     generate beyond the length of its context window, without losing fluency in the conversation. As it discards past
