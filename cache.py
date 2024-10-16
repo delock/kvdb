@@ -141,7 +141,6 @@ class SinkCacheExt(Cache):
         rerotation_cos, rerotation_sin = self._get_rerotation_cos_sin2(
             fronn, to, self._cos_cache[to: fronn+1], self._sin_cache[to: fronn+1], dtype)
         keys_to_keep = self.key_cache[layer_idx][:, :, fronn, :].unsqueeze(2)
-        #print(f'fronn {fronn} to {to} rerotation_cos {rerotation_cos.size()} rerotation_sin {rerotation_sin.size()} keys_to_keep {keys_to_keep.size()}')
         keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
         self.key_cache[layer_idx] = torch.cat(
             [self.key_cache[layer_idx][:, :, :to, :], keys_to_keep, self.key_cache[layer_idx][:, :, to + 1 :, :]],
@@ -205,7 +204,6 @@ class SinkCacheExt(Cache):
         if len(self.key_cache) <= layer_idx:
             if layer_idx == 0:
                 self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
-                #print (f"1. attn_shift_tuple = {self.attn_shift_tuple}")
                 assert (self.attn_shift_tuple == [])
             # Empty cache
             self.key_cache.append(key_states)
@@ -214,7 +212,6 @@ class SinkCacheExt(Cache):
         elif key_states.shape[-2] + self.get_seq_length(layer_idx) <= self.window_length:
             if layer_idx == 0:
                 self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
-                #print (f"2. attn_shift_tuple = {self.attn_shift_tuple}")
                 assert (self.attn_shift_tuple == [])
             # Growing cache
             self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], key_states], dim=-2)
@@ -223,7 +220,6 @@ class SinkCacheExt(Cache):
         else:
             if layer_idx == 0:
                 self.attn_shift_tuple = self.shift_attn_if_needed(key_states.shape[-2])
-                #print (f"3. attn_shift_tuple = {self.attn_shift_tuple}")
 
             # replace sink items according to shift_tuple
             for fronn, to in self.attn_shift_tuple:
@@ -250,7 +246,6 @@ class SinkCacheExt(Cache):
                         keys_to_keep[..., :partial_rotation_size],
                         keys_to_keep[..., partial_rotation_size:],
                     )
-                #print(f'rerotation_cos {rerotation_cos.size()} rerotation_sin {rerotation_sin.size()} keys_to_keep {keys_to_keep.size()}')
                 keys_to_keep = self._apply_key_rotary_pos_emb(keys_to_keep, rerotation_cos, rerotation_sin)
                 if partial_rotation_size is not None:
                     keys_to_keep = torch.cat((keys_to_keep, keys_pass), dim=-1)
@@ -274,19 +269,14 @@ class SinkCacheExt(Cache):
     def shift_attn_if_needed(self, new_token_length):
         return_val = []
         self.attn_sink_length += new_token_length
-        #if self.attn_sink_length <= self.window_length-self.num_sink_tokens:
         if self.attn_sink_length <= self.window_length:
-            #print (f"       *{self.attn_sink_length} {new_token_length} {self.attn_sink[self.num_sink_tokens]} {self.attn_sink.size()} {self.attn_sink}")
-            #print (f"vvvvvvvvvvvvvvvvvv\n{self.attn_sink_length}, {self.window_length}, {new_token_length}\nbefore {self.attn_sink}")
             self.attn_sink = F.pad(self.attn_sink[new_token_length:], (0, new_token_length))
-            #print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
             return return_val
 
         if self.replace_sink_tokens == 0:
             return return_val
 
         # attn_sink already full, need to overflow
-        #overflow = self.attn_sink_length - (self.window_length-self.num_sink_tokens)
         overflow = self.attn_sink_length - self.window_length
         # For each overflow token:
         #     1. Find the item with smallest attention score among sink tokens
@@ -294,29 +284,21 @@ class SinkCacheExt(Cache):
         #     3. Replace the smallest attention score with the overflow token if the overflow token has higher attention score
         #     4. If replace happens, add shift position tuple to the return list
 
-        #print (f"       # overflow {overflow} items")
         assert(self.replace_sink_tokens <= self.num_sink_tokens and self.replace_sink_tokens > 0)
         for i in range(overflow):
             min_idx = self.attn_sink[self.num_sink_tokens-self.replace_sink_tokens:self.num_sink_tokens].argmin() + self.num_sink_tokens - self.replace_sink_tokens
-            #print (f"               {i} -- overflow attn {self.attn_sink[i+self.num_sink_tokens]}, min in sink {self.attn_sink[min_idx]}")
             if self.attn_sink[min_idx] < self.attn_sink[i+self.num_sink_tokens]:
-                # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens]
-                #print ("                      replace")
-                #print ("#", end="")
+                # replace attn_sink[min_idx] with attn_sink[i+self.num_sink_tokens], and shift the rest
                 for i in range(min_idx+1, self.num_sink_tokens):
                     self.attn_sink[i-1] = self.attn_sink[i]
                     return_val.append((i, i-1))
                 self.attn_sink[self.num_sink_tokens-1] = self.attn_sink[i+self.num_sink_tokens]
                 return_val.append((i+self.num_sink_tokens, self.num_sink_tokens-1))
-                #self.attn_sink[min_idx] = self.attn_sink[i+self.num_sink_tokens]
-                #return_val.append((i+self.num_sink_tokens, min_idx))
-        #print (f"vvvvvvvvvvvvvvvvvv\nbefore {self.attn_sink}")
         self.attn_sink = F.pad(torch.cat((
               self.attn_sink[0:self.num_sink_tokens],
               self.attn_sink[self.num_sink_tokens+new_token_length:]
               )), (0, new_token_length))
         self.attn_sink_length -= overflow
-        #print (f"after {self.attn_sink}\n^^^^^^^^^^^^^^^^^^")
         #degredate attention scores
         for i in range(self.num_sink_tokens):
             self.attn_sink[i] *= self.regression
@@ -338,5 +320,3 @@ class SinkCacheExt(Cache):
             self.attn_sink += attn_score
         else:
             self.attn_sink += F.pad(attn_score, (self.num_sink_tokens, 0))
-        #if layer_idx == 0:
-            #print (layer_idx, self.attn_sink)
